@@ -36,7 +36,11 @@ defmodule ThreadifiWeb.ChatLive.Show do
         |> assign(:mention_suggestions, [])
         |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
         |> assign(:show_snippet_modal, false)
+        |> assign(:snippet_target, :main)
         |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
+        |> assign(:thread_parent, nil)
+        |> assign(:thread_form, to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread))
+        |> stream(:thread_messages, [])
         |> stream(:messages, Chat.list_messages(channel.id))
 
       {:ok, socket}
@@ -90,134 +94,220 @@ defmodule ThreadifiWeb.ChatLive.Show do
           </aside>
 
           <main class="flex-1 px-10 py-10">
-            <div class="mx-auto flex h-[calc(100vh-5rem)] max-w-5xl flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <header class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Channel</p>
-                  <h1 class="text-lg font-semibold text-slate-900">#{@channel.name}</h1>
-                </div>
-                <span class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {@channel.type}
-                </span>
-              </header>
-
-              <section
-                id="messages"
-                phx-update="stream"
-                phx-hook="ChannelMessages"
-                data-channel-id={@channel.id}
-                class="relative flex-1 overflow-y-auto px-6 py-6"
-              >
-                <div
-                  :for={{id, message} <- @streams.messages}
-                  id={id}
-                  class="group flex gap-4 border-b border-slate-100 py-4 last:border-b-0"
-                >
-                  <span id={"message-#{message.id}"} class="sr-only"></span>
-                  <div class="mt-1 h-10 w-10 flex-shrink-0 rounded-full bg-slate-200 text-center text-sm font-semibold leading-10 text-slate-600">
-                    {String.first(message.user.email) |> String.upcase()}
+            <div class="mx-auto flex h-[calc(100vh-5rem)] max-w-6xl gap-6">
+              <div class="flex h-full flex-1 flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <header class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Channel</p>
+                    <h1 class="text-lg font-semibold text-slate-900">#{@channel.name}</h1>
                   </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-3 text-sm">
-                      <span class="font-semibold text-slate-900">{message.user.email}</span>
-                      <span class="text-xs text-slate-400">
-                        {Calendar.strftime(message.inserted_at, "%b %d · %I:%M%p")}
-                      </span>
+                  <span class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {@channel.type}
+                  </span>
+                </header>
+
+                <section
+                  id="messages"
+                  phx-update="stream"
+                  phx-hook="ChannelMessages"
+                  data-channel-id={@channel.id}
+                  class="relative flex-1 overflow-y-auto px-6 py-6"
+                >
+                  <div
+                    :for={{id, message} <- @streams.messages}
+                    id={id}
+                    class="group flex gap-4 border-b border-slate-100 py-4 last:border-b-0"
+                  >
+                    <span id={"message-#{message.id}"} class="sr-only"></span>
+                    <div class="mt-1 h-10 w-10 flex-shrink-0 rounded-full bg-slate-200 text-center text-sm font-semibold leading-10 text-slate-600">
+                      {String.first(message.user.email) |> String.upcase()}
                     </div>
-                    <div class="mt-2 text-sm leading-6 text-slate-700">
-                      <%= if message.format == :snippet do %>
-                        <div class="rounded-xl border border-slate-200 bg-slate-950/5 px-4 py-3">
-                          <div class="flex items-center justify-between">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {message.snippet.language}
-                            </div>
-                            <button
-                              id={"snippet-copy-#{message.id}"}
-                              type="button"
-                              phx-hook="SnippetCopy"
-                              data-target={"snippet-code-#{message.id}"}
-                              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300"
-                            >
-                              <.icon name="hero-clipboard" class="h-4 w-4" />
-                              <span class="copy-label">Copy</span>
-                            </button>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-3 text-sm">
+                        <span class="font-semibold text-slate-900">{message.user.email}</span>
+                        <span class="text-xs text-slate-400">
+                          {Calendar.strftime(message.inserted_at, "%b %d · %I:%M%p")}
+                        </span>
+                      </div>
+                      <div class="mt-2 text-sm leading-6 text-slate-700">
+                        <%= if message.format == :snippet do %>
+                          <.snippet_card message={message} />
+                        <% else %>
+                          <div class="whitespace-pre-wrap">
+                            {render_message_body(message)}
                           </div>
-                          <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
-                            <code
-                              id={"snippet-code-#{message.id}"}
-                              phx-hook="SnippetHighlight"
-                              class={"language-#{message.snippet.language}"}
-                              phx-no-curly-interpolation
-                            ><%= message.snippet.code %></code>
-                          </pre>
-                        </div>
-                      <% else %>
-                        <div class="whitespace-pre-wrap">
-                          {render_message_body(message)}
+                        <% end %>
+                      </div>
+                      <div class="mt-3 flex items-center gap-4 text-xs font-semibold text-slate-500">
+                        <button
+                          type="button"
+                          phx-click="open_thread"
+                          phx-value-message-id={message.id}
+                          class="transition hover:text-slate-900"
+                        >
+                          Reply
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="new-message-indicator absolute bottom-4 left-1/2 hidden -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-lg transition hover:bg-slate-800"
+                  >
+                    New messages <.icon name="hero-arrow-down" class="h-4 w-4" />
+                  </button>
+                </section>
+
+                <footer class="border-t border-slate-200 px-6 py-4">
+                  <.form
+                    for={@form}
+                    id="message-form"
+                    phx-submit="send_message"
+                    phx-change="change_message"
+                  >
+                    <div class="relative">
+                      <.input
+                        field={@form[:body]}
+                        type="textarea"
+                        label="Message"
+                        placeholder="Write a message…"
+                        phx-hook="MessageComposer"
+                        data-snippet-target="main"
+                        id="message-body"
+                        rows="4"
+                        required
+                      />
+                      <%= if @mention_query && @mention_suggestions != [] do %>
+                        <div class="absolute bottom-16 left-3 z-10 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
+                          <ul class="max-h-44 overflow-y-auto p-2 text-sm text-slate-700">
+                            <li
+                              :for={user <- @mention_suggestions}
+                              class="flex items-center justify-between rounded-lg px-2 py-2 transition hover:bg-slate-100"
+                            >
+                              <button
+                                type="button"
+                                phx-click="select_mention"
+                                phx-value-username={username_for_user(user)}
+                                class="flex w-full items-center justify-between text-left"
+                              >
+                                <span class="font-semibold">@{username_for_user(user)}</span>
+                                <span class="text-xs text-slate-400">{user.email}</span>
+                              </button>
+                            </li>
+                          </ul>
                         </div>
                       <% end %>
+                      <button
+                        type="submit"
+                        class="absolute bottom-3 right-3 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                      >
+                        Send
+                      </button>
                     </div>
-                  </div>
-                </div>
+                    <p class="mt-2 text-xs text-slate-400">
+                      Enter to send · Shift + Enter for a new line
+                    </p>
+                  </.form>
+                </footer>
+              </div>
 
-                <button
-                  type="button"
-                  class="new-message-indicator absolute bottom-4 left-1/2 hidden -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-lg transition hover:bg-slate-800"
-                >
-                  New messages <.icon name="hero-arrow-down" class="h-4 w-4" />
-                </button>
-              </section>
-
-              <footer class="border-t border-slate-200 px-6 py-4">
-                <.form
-                  for={@form}
-                  id="message-form"
-                  phx-submit="send_message"
-                  phx-change="change_message"
-                >
-                  <div class="relative">
-                    <.input
-                      field={@form[:body]}
-                      type="textarea"
-                      label="Message"
-                      placeholder="Write a message…"
-                      phx-hook="MessageComposer"
-                      id="message-body"
-                      rows="4"
-                      required
-                    />
-                    <%= if @mention_query && @mention_suggestions != [] do %>
-                      <div class="absolute bottom-16 left-3 z-10 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
-                        <ul class="max-h-44 overflow-y-auto p-2 text-sm text-slate-700">
-                          <li
-                            :for={user <- @mention_suggestions}
-                            class="flex items-center justify-between rounded-lg px-2 py-2 transition hover:bg-slate-100"
-                          >
-                            <button
-                              type="button"
-                              phx-click="select_mention"
-                              phx-value-username={username_for_user(user)}
-                              class="flex w-full items-center justify-between text-left"
-                            >
-                              <span class="font-semibold">@{username_for_user(user)}</span>
-                              <span class="text-xs text-slate-400">{user.email}</span>
-                            </button>
-                          </li>
-                        </ul>
+              <aside class="w-full max-w-sm rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <%= if @thread_parent do %>
+                  <div class="flex h-full flex-col">
+                    <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                      <div>
+                        <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Thread</p>
+                        <h2 class="text-sm font-semibold text-slate-900">
+                          Reply to {@thread_parent.user.email}
+                        </h2>
                       </div>
-                    <% end %>
-                    <button
-                      type="submit"
-                      class="absolute bottom-3 right-3 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                      <button
+                        type="button"
+                        phx-click="close_thread"
+                        class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300"
+                      >
+                        Close
+                      </button>
+                    </header>
+
+                    <div class="border-b border-slate-100 px-5 py-4">
+                      <p class="text-xs text-slate-500">
+                        {Calendar.strftime(@thread_parent.inserted_at, "%b %d · %I:%M%p")}
+                      </p>
+                      <p class="mt-2 text-sm text-slate-700">
+                        {render_message_body(@thread_parent)}
+                      </p>
+                    </div>
+
+                    <section
+                      id="thread-messages"
+                      phx-update="stream"
+                      class="flex-1 overflow-y-auto px-5 py-4"
                     >
-                      Send
-                    </button>
+                      <div class="hidden text-xs text-slate-400 only:block">
+                        No replies yet.
+                      </div>
+                      <div
+                        :for={{id, message} <- @streams.thread_messages}
+                        id={id}
+                        class="border-b border-slate-100 py-3 last:border-b-0"
+                      >
+                        <div class="text-xs font-semibold text-slate-600">
+                          {message.user.email}
+                        </div>
+                        <div class="text-[11px] text-slate-400">
+                          {Calendar.strftime(message.inserted_at, "%b %d · %I:%M%p")}
+                        </div>
+                        <div class="mt-2 text-sm text-slate-700">
+                          <%= if message.format == :snippet do %>
+                            <.snippet_card message={message} compact />
+                          <% else %>
+                            {render_message_body(message)}
+                          <% end %>
+                        </div>
+                      </div>
+                    </section>
+
+                    <footer class="border-t border-slate-200 px-5 py-4">
+                      <.form
+                        for={@thread_form}
+                        id="thread-form"
+                        phx-submit="send_thread_message"
+                      >
+                        <div class="relative">
+                          <.input
+                            field={@thread_form[:body]}
+                            type="textarea"
+                            label="Reply"
+                            placeholder="Write a reply…"
+                            phx-hook="MessageComposer"
+                            data-snippet-target="thread"
+                            id="thread-body"
+                            rows="3"
+                            required
+                          />
+                          <button
+                            type="submit"
+                            class="absolute bottom-3 right-3 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                          >
+                            Reply
+                          </button>
+                        </div>
+                      </.form>
+                    </footer>
                   </div>
-                  <p class="mt-2 text-xs text-slate-400">
-                    Enter to send · Shift + Enter for a new line
-                  </p>
-                </.form>
-              </footer>
+                <% else %>
+                  <div class="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+                    <div class="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Thread
+                    </div>
+                    <p class="text-sm text-slate-500">
+                      Select a message to view replies.
+                    </p>
+                  </div>
+                <% end %>
+              </aside>
             </div>
           </main>
         </div>
@@ -304,6 +394,64 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
+  def handle_event("open_thread", %{"message-id" => message_id}, socket) do
+    message_id = String.to_integer(message_id)
+    parent = Chat.get_message!(message_id)
+    replies = Chat.list_thread_messages(message_id)
+
+    {:noreply,
+     socket
+     |> assign(:thread_parent, parent)
+     |> assign(:thread_form, to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread))
+     |> stream(:thread_messages, replies, reset: true)}
+  end
+
+  @impl true
+  def handle_event("close_thread", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:thread_parent, nil)
+     |> assign(:thread_form, to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread))
+     |> stream(:thread_messages, [], reset: true)}
+  end
+
+  @impl true
+  def handle_event("send_thread_message", %{"thread" => params}, socket) do
+    current_scope = socket.assigns.current_scope
+    channel = socket.assigns.channel
+    parent = socket.assigns.thread_parent
+
+    case parent do
+      nil ->
+        {:noreply, socket}
+
+      _ ->
+        case Chat.create_message(
+               current_scope.user,
+               channel,
+               Map.put(params, "parent_message_id", parent.id)
+             ) do
+          {:ok, message} ->
+            Phoenix.PubSub.broadcast(
+              Threadifi.PubSub,
+              channel_topic(channel),
+              {:message_created, message}
+            )
+
+            {:noreply,
+             socket
+             |> assign(
+               :thread_form,
+               to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread)
+             )}
+
+          {:error, changeset} ->
+            {:noreply, assign(socket, :thread_form, to_form(changeset, as: :thread))}
+        end
+    end
+  end
+
+  @impl true
   def handle_event("change_message", %{"message" => params}, socket) do
     body = Map.get(params, "body", "")
 
@@ -333,8 +481,17 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
-  def handle_event("open_snippet_modal", _params, socket) do
-    {:noreply, assign(socket, :show_snippet_modal, true)}
+  def handle_event("open_snippet_modal", params, socket) do
+    target =
+      case Map.get(params, "target") do
+        "thread" -> :thread
+        _ -> :main
+      end
+
+    {:noreply,
+     socket
+     |> assign(:snippet_target, target)
+     |> assign(:show_snippet_modal, true)}
   end
 
   @impl true
@@ -342,6 +499,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
     {:noreply,
      socket
      |> assign(:show_snippet_modal, false)
+     |> assign(:snippet_target, :main)
      |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))}
   end
 
@@ -372,8 +530,23 @@ defmodule ThreadifiWeb.ChatLive.Show do
       code: Map.get(params, "code", "")
     }
 
+    message_payload =
+      case socket.assigns.snippet_target do
+        :thread when socket.assigns.thread_parent ->
+          %{
+            body: message_body,
+            format: :snippet,
+            parent_message_id: socket.assigns.thread_parent.id
+          }
+
+        _ ->
+          %{body: message_body, format: :snippet}
+      end
+
+    target = socket.assigns.snippet_target
+
     case Chat.create_snippet_message(current_scope.user, channel, %{
-           message: %{body: message_body, format: :snippet},
+           message: message_payload,
            snippet: snippet_params
          }) do
       {:ok, message} ->
@@ -383,10 +556,24 @@ defmodule ThreadifiWeb.ChatLive.Show do
           {:message_created, message}
         )
 
-        {:noreply,
-         socket
-         |> assign(:show_snippet_modal, false)
-         |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))}
+        socket =
+          socket
+          |> assign(:show_snippet_modal, false)
+          |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
+          |> assign(:snippet_target, :main)
+
+        socket =
+          if target == :thread do
+            assign(
+              socket,
+              :thread_form,
+              to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread)
+            )
+          else
+            assign(socket, :form, to_form(Chat.Message.changeset(%Message{}, %{})))
+          end
+
+        {:noreply, socket}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :snippet_form, to_form(changeset, as: :snippet))}
@@ -395,10 +582,13 @@ defmodule ThreadifiWeb.ChatLive.Show do
 
   @impl true
   def handle_info({:message_created, message}, socket) do
-    {:noreply,
-     socket
-     |> stream_insert(:messages, message)
-     |> push_event("new_message", %{message_id: message.id})}
+    socket =
+      socket
+      |> maybe_insert_thread_message(message)
+      |> maybe_insert_main_message(message)
+      |> push_event("new_message", %{message_id: message.id})
+
+    {:noreply, socket}
   end
 
   defp authorize_channel(%{type: :public}, _scope), do: :ok
@@ -443,6 +633,59 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp render_message_body(%Message{body: body}), do: body
+
+  defp snippet_card(assigns) do
+    assigns = assign_new(assigns, :compact, fn -> false end)
+
+    ~H"""
+    <div class={[
+      "rounded-xl border border-slate-200 bg-slate-950/5 px-4 py-3",
+      @compact && "text-xs"
+    ]}>
+      <div class="flex items-center justify-between">
+        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {@message.snippet.language}
+        </div>
+        <button
+          id={"snippet-copy-#{@message.id}"}
+          type="button"
+          phx-hook="SnippetCopy"
+          data-target={"snippet-code-#{@message.id}"}
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300"
+        >
+          <.icon name="hero-clipboard" class="h-4 w-4" />
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+      <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
+        <code
+          id={"snippet-code-#{@message.id}"}
+          phx-hook="SnippetHighlight"
+          class={"language-#{@message.snippet.language}"}
+          phx-no-curly-interpolation
+        ><%= @message.snippet.code %></code>
+      </pre>
+    </div>
+    """
+  end
+
+  defp maybe_insert_thread_message(socket, message) do
+    case socket.assigns.thread_parent do
+      %{id: parent_id} when message.parent_message_id == parent_id ->
+        stream_insert(socket, :thread_messages, message)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp maybe_insert_main_message(socket, message) do
+    if is_nil(message.parent_message_id) do
+      stream_insert(socket, :messages, message)
+    else
+      socket
+    end
+  end
 
   defp mention_suggestions(body, members) do
     case extract_mention_query(body) do

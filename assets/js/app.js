@@ -109,7 +109,8 @@ const MessageComposer = {
       if (this.el.value.trim() === "/snippet" && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault()
         this.el.value = ""
-        this.pushEvent("open_snippet_modal", {})
+        let target = this.el.dataset.snippetTarget || "main"
+        this.pushEvent("open_snippet_modal", {target})
         return
       }
 
