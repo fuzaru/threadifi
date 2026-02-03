@@ -25,11 +25,79 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/threadifi"
 import topbar from "../vendor/topbar"
 
+const ChannelMessages = {
+  mounted() {
+    this.atBottom = true
+    this.indicator = this.el.querySelector(".new-message-indicator")
+
+    this.handleEvent("new_message", () => this.onNewMessage())
+    this.el.addEventListener("scroll", () => this.updateScrollState())
+
+    if (this.indicator) {
+      this.indicator.addEventListener("click", () => {
+        this.scrollToBottom()
+        this.hideIndicator()
+      })
+    }
+
+    this.scrollToBottom()
+  },
+  updated() {
+    this.onNewMessage()
+  },
+  onNewMessage() {
+    if (this.isNearBottom()) {
+      this.scrollToBottom()
+      this.hideIndicator()
+    } else {
+      this.showIndicator()
+    }
+  },
+  updateScrollState() {
+    this.atBottom = this.isNearBottom()
+    if (this.atBottom) {
+      this.hideIndicator()
+    }
+  },
+  isNearBottom() {
+    return this.el.scrollTop + this.el.clientHeight >= this.el.scrollHeight - 24
+  },
+  scrollToBottom() {
+    this.el.scrollTop = this.el.scrollHeight
+  },
+  showIndicator() {
+    if (this.indicator) {
+      this.indicator.classList.remove("hidden")
+      this.indicator.classList.add("flex")
+    }
+  },
+  hideIndicator() {
+    if (this.indicator) {
+      this.indicator.classList.add("hidden")
+      this.indicator.classList.remove("flex")
+    }
+  },
+}
+
+const MessageComposer = {
+  mounted() {
+    this.el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault()
+        let form = this.el.closest("form")
+        if (form) {
+          form.requestSubmit()
+        }
+      }
+    })
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ChannelMessages, MessageComposer},
 })
 
 // Show progress bar on live navigation and form submits
@@ -80,4 +148,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

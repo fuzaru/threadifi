@@ -48,6 +48,7 @@ defmodule ThreadifiWeb.Router do
       on_mount: [{ThreadifiWeb.UserAuth, :require_authenticated}] do
       live "/", WorkspaceLive.Index, :index
       live "/w/:workspace_slug", WorkspaceLive.Show, :show
+      live "/w/:workspace_slug/c/:channel_slug", ChatLive.Show, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

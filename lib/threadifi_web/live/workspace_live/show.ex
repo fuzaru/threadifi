@@ -99,10 +99,11 @@ defmodule ThreadifiWeb.WorkspaceLive.Show do
                   <div class="hidden rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-sm text-slate-500 only:block">
                     No channels yet.
                   </div>
-                  <div
+                  <.link
                     :for={{id, channel} <- @streams.channels}
                     id={id}
-                    class="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm"
+                    navigate={~p"/w/#{@workspace.slug}/c/#{channel.slug}"}
+                    class="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm transition hover:border-slate-300"
                   >
                     <div>
                       <div class="text-sm font-semibold text-slate-900">#{channel.name}</div>
@@ -111,7 +112,7 @@ defmodule ThreadifiWeb.WorkspaceLive.Show do
                     <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {channel.type}
                     </div>
-                  </div>
+                  </.link>
                 </div>
               </section>
             </div>

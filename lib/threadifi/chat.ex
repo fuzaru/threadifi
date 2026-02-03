@@ -24,6 +24,7 @@ defmodule Threadifi.Chat do
     |> maybe_before(before)
     |> order_by([m], asc: m.inserted_at)
     |> limit(^limit)
+    |> preload(:user)
     |> Repo.all()
   end
 
@@ -33,6 +34,10 @@ defmodule Threadifi.Chat do
     %Message{}
     |> Message.changeset(attrs)
     |> Repo.insert()
+    |> case do
+      {:ok, message} -> {:ok, Repo.preload(message, :user)}
+      {:error, changeset} -> {:error, changeset}
+    end
   end
 
   def create_snippet_message(%User{} = user, %Channel{} = channel, attrs) do
