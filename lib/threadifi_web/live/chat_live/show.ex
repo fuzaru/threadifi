@@ -50,6 +50,8 @@ defmodule ThreadifiWeb.ChatLive.Show do
         |> assign(:online_users, online_users(channel))
         |> assign(:search_query, "")
         |> assign(:search_results, [])
+        |> assign(:show_pins, false)
+        |> assign(:pinned_messages, Chat.list_pinned_messages(channel.id))
         |> stream(:thread_messages, [])
         |> stream(:messages, Chat.list_messages(channel.id))
 
@@ -180,8 +182,59 @@ defmodule ThreadifiWeb.ChatLive.Show do
                     <span class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {@channel.type}
                     </span>
+                    <button
+                      type="button"
+                      phx-click="toggle_pins"
+                      class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 transition hover:border-slate-300"
+                    >
+                      Pinned
+                    </button>
                   </div>
                 </header>
+                <%= if @show_pins do %>
+                  <div class="border-b border-slate-200 bg-slate-50 px-6 py-4">
+                    <div class="flex items-center justify-between">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Pinned
+                      </p>
+                      <button
+                        type="button"
+                        phx-click="toggle_pins"
+                        class="text-xs font-semibold text-slate-500 hover:text-slate-700"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <div class="mt-3 space-y-2">
+                      <div class="hidden text-xs text-slate-400 only:block">
+                        No pinned items yet.
+                      </div>
+                      <div
+                        :for={pin <- @pinned_messages}
+                        class="rounded-xl border border-slate-200 bg-white px-4 py-3"
+                      >
+                        <div class="flex items-center justify-between text-xs text-slate-400">
+                          <span>{pin.message.user.email}</span>
+                          <span>{Calendar.strftime(pin.inserted_at, "%b %d · %I:%M%p")}</span>
+                        </div>
+                        <p class="mt-2 text-sm text-slate-700">
+                          {message_preview(pin.message)}
+                        </p>
+                        <div class="mt-2">
+                          <.link
+                            navigate={
+                            ~p"/w/#{@workspace.slug}/c/#{@channel.slug}" <>
+                              "#message-#{pin.message.id}"
+                          }
+                            class="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                          >
+                            Jump to message →
+                          </.link>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                <% end %>
 
                 <section
                   id="messages"
@@ -215,7 +268,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
                           </div>
                         <% end %>
                       </div>
-                      <div class="mt-3 flex items-center gap-4 text-xs font-semibold text-slate-500">
+                      <div class="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
                         <button
                           type="button"
                           phx-click="open_thread"
@@ -224,6 +277,29 @@ defmodule ThreadifiWeb.ChatLive.Show do
                         >
                           Reply
                         </button>
+                        <button
+                          type="button"
+                          phx-click="toggle_pin"
+                          phx-value-message-id={message.id}
+                          class="transition hover:text-slate-900"
+                        >
+                          Pin
+                        </button>
+                        <div class="flex items-center gap-2">
+                          <button
+                            :for={emoji <- ["👍", "🎉", "❤️", "👀"]}
+                            type="button"
+                            phx-click="toggle_reaction"
+                            phx-value-message-id={message.id}
+                            phx-value-emoji={emoji}
+                            class="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600 transition hover:border-slate-300"
+                          >
+                            {emoji}
+                            <span class="ml-1 text-[10px] text-slate-400">
+                              {reaction_count(message, emoji)}
+                            </span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -347,6 +423,21 @@ defmodule ThreadifiWeb.ChatLive.Show do
                           <% else %>
                             {render_message_body(message)}
                           <% end %>
+                        </div>
+                        <div class="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-500">
+                          <button
+                            :for={emoji <- ["👍", "🎉", "❤️", "👀"]}
+                            type="button"
+                            phx-click="toggle_reaction"
+                            phx-value-message-id={message.id}
+                            phx-value-emoji={emoji}
+                            class="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600 transition hover:border-slate-300"
+                          >
+                            {emoji}
+                            <span class="ml-1 text-[10px] text-slate-400">
+                              {reaction_count(message, emoji)}
+                            </span>
+                          </button>
                         </div>
                       </div>
                     </section>
@@ -473,6 +564,61 @@ defmodule ThreadifiWeb.ChatLive.Show do
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset))}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_reaction", %{"message-id" => message_id, "emoji" => emoji}, socket) do
+    user = socket.assigns.current_scope.user
+    message_id = String.to_integer(message_id)
+    message = Chat.get_message_with_assocs!(message_id)
+
+    case Chat.toggle_reaction(user, message, emoji) do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(
+          Threadifi.PubSub,
+          channel_topic(socket.assigns.channel),
+          {:reaction_updated, message_id}
+        )
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_pin", %{"message-id" => message_id}, socket) do
+    message_id = String.to_integer(message_id)
+    channel_id = socket.assigns.channel.id
+    scope = socket.assigns.current_scope
+
+    case Chat.pin_message(scope, channel_id, message_id) do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(
+          Threadifi.PubSub,
+          channel_topic(socket.assigns.channel),
+          {:pins_updated, channel_id}
+        )
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {_, _} = Chat.unpin_message(channel_id, message_id)
+
+        Phoenix.PubSub.broadcast(
+          Threadifi.PubSub,
+          channel_topic(socket.assigns.channel),
+          {:pins_updated, channel_id}
+        )
+
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_pins", _params, socket) do
+    {:noreply, assign(socket, :show_pins, !socket.assigns.show_pins)}
   end
 
   @impl true
@@ -705,6 +851,28 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
+  def handle_info({:reaction_updated, message_id}, socket) do
+    message = Chat.get_message_with_assocs!(message_id)
+
+    socket =
+      socket
+      |> maybe_update_thread_parent(message)
+      |> maybe_insert_thread_message(message)
+      |> maybe_insert_main_message(message)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:pins_updated, channel_id}, socket) do
+    if socket.assigns.channel.id == channel_id do
+      {:noreply, assign(socket, :pinned_messages, Chat.list_pinned_messages(channel_id))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     {:noreply, assign(socket, :online_users, online_users(socket.assigns.channel))}
   end
@@ -810,6 +978,11 @@ defmodule ThreadifiWeb.ChatLive.Show do
     String.slice(body, 0, 120)
   end
 
+  defp reaction_count(message, emoji) do
+    message.reactions
+    |> Enum.count(&(&1.emoji == emoji))
+  end
+
   defp snippet_card(assigns) do
     assigns = assign_new(assigns, :compact, fn -> false end)
 
@@ -860,6 +1033,16 @@ defmodule ThreadifiWeb.ChatLive.Show do
       stream_insert(socket, :messages, message)
     else
       socket
+    end
+  end
+
+  defp maybe_update_thread_parent(socket, message) do
+    case socket.assigns.thread_parent do
+      %{id: parent_id} when parent_id == message.id ->
+        assign(socket, :thread_parent, message)
+
+      _ ->
+        socket
     end
   end
 

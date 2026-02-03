@@ -8,7 +8,7 @@ defmodule Threadifi.Chat do
   alias Threadifi.Repo
 
   alias Threadifi.Accounts.{Scope, User}
-  alias Threadifi.Chat.{Mention, Message, MessageReaction, Snippet}
+  alias Threadifi.Chat.{Mention, Message, MessageReaction, PinnedMessage, Snippet}
   alias Threadifi.Workspaces.Channel
 
   def list_messages(channel_id, opts \\ [])
@@ -25,7 +25,7 @@ defmodule Threadifi.Chat do
     |> maybe_before(before)
     |> order_by([m], asc: m.inserted_at)
     |> limit(^limit)
-    |> preload([:user, :snippet, :mentions])
+    |> preload([:user, :snippet, :mentions, :reactions])
     |> Repo.all()
   end
 
@@ -85,7 +85,7 @@ defmodule Threadifi.Chat do
   def get_message!(id) do
     Message
     |> where([m], m.id == ^id)
-    |> preload([:user, :snippet])
+    |> preload([:user, :snippet, :reactions])
     |> Repo.one!()
   end
 
@@ -93,8 +93,15 @@ defmodule Threadifi.Chat do
     Message
     |> where([m], m.parent_message_id == ^parent_message_id)
     |> order_by([m], asc: m.inserted_at)
-    |> preload([:user, :snippet, :mentions])
+    |> preload([:user, :snippet, :mentions, :reactions])
     |> Repo.all()
+  end
+
+  def get_message_with_assocs!(id) do
+    Message
+    |> where([m], m.id == ^id)
+    |> preload([:user, :snippet, :mentions, :reactions])
+    |> Repo.one!()
   end
 
   def search_workspace(%Scope{user: %User{id: user_id}}, workspace_id, query) do
@@ -121,6 +128,33 @@ defmodule Threadifi.Chat do
       |> Repo.all()
       |> group_search_results()
     end
+  end
+
+  def list_pinned_messages(channel_id) when is_integer(channel_id) do
+    PinnedMessage
+    |> where([p], p.channel_id == ^channel_id)
+    |> join(:inner, [p], m in assoc(p, :message))
+    |> join(:inner, [p, m], u in assoc(m, :user))
+    |> join(:left, [p, m, u], s in assoc(m, :snippet))
+    |> preload([p, m, u, s], message: {m, [user: u, snippet: s]})
+    |> order_by([p], desc: p.inserted_at)
+    |> Repo.all()
+  end
+
+  def pin_message(%Scope{user: %User{id: user_id}}, channel_id, message_id) do
+    %PinnedMessage{}
+    |> PinnedMessage.changeset(%{})
+    |> Ecto.Changeset.put_change(:channel_id, channel_id)
+    |> Ecto.Changeset.put_change(:message_id, message_id)
+    |> Ecto.Changeset.put_change(:pinned_by_user_id, user_id)
+    |> Ecto.Changeset.validate_required([:channel_id, :message_id, :pinned_by_user_id])
+    |> Repo.insert(on_conflict: :nothing)
+  end
+
+  def unpin_message(channel_id, message_id) do
+    PinnedMessage
+    |> where([p], p.channel_id == ^channel_id and p.message_id == ^message_id)
+    |> Repo.delete_all()
   end
 
   defp group_search_results(messages) do

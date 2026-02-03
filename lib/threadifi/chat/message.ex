@@ -3,7 +3,7 @@ defmodule Threadifi.Chat.Message do
   import Ecto.Changeset
 
   alias Threadifi.Accounts.User
-  alias Threadifi.Chat.{Mention, Message, MessageReaction, Snippet}
+  alias Threadifi.Chat.{Mention, Message, MessageReaction, PinnedMessage, Snippet}
   alias Threadifi.Workspaces.Channel
 
   schema "messages" do
@@ -17,6 +17,7 @@ defmodule Threadifi.Chat.Message do
     has_one :snippet, Snippet
     has_many :reactions, MessageReaction
     has_many :mentions, Mention
+    has_many :pins, PinnedMessage
 
     timestamps(type: :utc_datetime)
   end
