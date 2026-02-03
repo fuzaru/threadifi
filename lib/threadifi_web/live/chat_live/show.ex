@@ -3,6 +3,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
 
   alias Threadifi.Chat
   alias Threadifi.Chat.Message
+  alias Threadifi.Chat.Snippet
   alias Threadifi.Workspaces
 
   @impl true
@@ -22,14 +23,16 @@ defmodule ThreadifiWeb.ChatLive.Show do
         Phoenix.PubSub.subscribe(Threadifi.PubSub, channel_topic(channel))
       end
 
-      socket =
-        socket
-        |> assign(:page_title, channel.name)
-        |> assign(:workspace, workspace)
-        |> assign(:channels, channels)
-        |> assign(:channel, channel)
-        |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
-        |> stream(:messages, Chat.list_messages(channel.id))
+        socket =
+          socket
+          |> assign(:page_title, channel.name)
+          |> assign(:workspace, workspace)
+          |> assign(:channels, channels)
+          |> assign(:channel, channel)
+          |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
+          |> assign(:show_snippet_modal, false)
+          |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
+          |> stream(:messages, Chat.list_messages(channel.id))
 
       {:ok, socket}
     else
@@ -115,9 +118,39 @@ defmodule ThreadifiWeb.ChatLive.Show do
                         {Calendar.strftime(message.inserted_at, "%b %d · %I:%M%p")}
                       </span>
                     </div>
-                    <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                      {message.body}
-                    </p>
+                    <div class="mt-2 text-sm leading-6 text-slate-700">
+                      <%= if message.format == :snippet do %>
+                        <div class="rounded-xl border border-slate-200 bg-slate-950/5 px-4 py-3">
+                          <div class="flex items-center justify-between">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              {message.snippet.language}
+                            </div>
+                            <button
+                              id={"snippet-copy-#{message.id}"}
+                              type="button"
+                              phx-hook="SnippetCopy"
+                              data-target={"snippet-code-#{message.id}"}
+                              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300"
+                            >
+                              <.icon name="hero-clipboard" class="h-4 w-4" />
+                              <span class="copy-label">Copy</span>
+                            </button>
+                          </div>
+                          <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
+                            <code
+                              id={"snippet-code-#{message.id}"}
+                              phx-hook="SnippetHighlight"
+                              class={"language-#{message.snippet.language}"}
+                              phx-no-curly-interpolation
+                            ><%= message.snippet.code %></code>
+                          </pre>
+                        </div>
+                      <% else %>
+                        <div class="whitespace-pre-wrap">
+                          {render_message_body(message)}
+                        </div>
+                      <% end %>
+                    </div>
                   </div>
                 </div>
 
@@ -158,6 +191,59 @@ defmodule ThreadifiWeb.ChatLive.Show do
           </main>
         </div>
       </div>
+
+      <%= if @show_snippet_modal do %>
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-6">
+          <div class="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+            <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 class="text-lg font-semibold text-slate-900">Create snippet</h2>
+                <p class="text-xs text-slate-500">Share a code snippet with context.</p>
+              </div>
+              <button
+                type="button"
+                phx-click="close_snippet_modal"
+                class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300"
+              >
+                Close
+              </button>
+            </div>
+            <div class="px-6 py-6">
+              <.form
+                for={@snippet_form}
+                id="snippet-form"
+                phx-submit="create_snippet"
+                phx-change="validate_snippet"
+                class="space-y-4"
+              >
+                <.input field={@snippet_form[:title]} label="Title (optional)" type="text" />
+                <.input
+                  field={@snippet_form[:language]}
+                  type="select"
+                  label="Language"
+                  options={snippet_languages()}
+                  required
+                />
+                <.input
+                  field={@snippet_form[:code]}
+                  type="textarea"
+                  label="Code"
+                  rows="8"
+                  required
+                />
+                <div class="flex justify-end">
+                  <button
+                    type="submit"
+                    class="inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  >
+                    Create snippet
+                  </button>
+                </div>
+              </.form>
+            </div>
+          </div>
+        </div>
+      <% end %>
     </Layouts.app>
     """
   end
@@ -183,6 +269,67 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
+  def handle_event("open_snippet_modal", _params, socket) do
+    {:noreply, assign(socket, :show_snippet_modal, true)}
+  end
+
+  @impl true
+  def handle_event("close_snippet_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_snippet_modal, false)
+     |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))}
+  end
+
+  @impl true
+  def handle_event("validate_snippet", %{"snippet" => params}, socket) do
+    {:noreply, assign(socket, :snippet_form, to_form(snippet_changeset(params), as: :snippet))}
+  end
+
+  @impl true
+  def handle_event("create_snippet", %{"snippet" => params}, socket) do
+    current_scope = socket.assigns.current_scope
+    channel = socket.assigns.channel
+
+    title =
+      params
+      |> Map.get("title", "")
+      |> String.trim()
+
+    message_body =
+      case title do
+        "" -> "Code snippet"
+        value -> value
+      end
+
+    snippet_params = %{
+      title: if(title == "", do: nil, else: title),
+      language: Map.get(params, "language", ""),
+      code: Map.get(params, "code", "")
+    }
+
+    case Chat.create_snippet_message(current_scope.user, channel, %{
+           message: %{body: message_body, format: :snippet},
+           snippet: snippet_params
+         }) do
+      {:ok, message} ->
+        Phoenix.PubSub.broadcast(
+          Threadifi.PubSub,
+          channel_topic(channel),
+          {:message_created, message}
+        )
+
+        {:noreply,
+         socket
+         |> assign(:show_snippet_modal, false)
+         |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :snippet_form, to_form(changeset, as: :snippet))}
+    end
+  end
+
+  @impl true
   def handle_info({:message_created, message}, socket) do
     {:noreply,
      socket
@@ -201,4 +348,35 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp channel_topic(channel), do: "channel:#{channel.id}"
+
+  defp snippet_changeset(attrs) do
+    {%Snippet{}, %{title: :string, language: :string, code: :string}}
+    |> Ecto.Changeset.cast(attrs, [:title, :language, :code])
+    |> Ecto.Changeset.validate_required([:language, :code])
+  end
+
+  defp snippet_languages do
+    [
+      {"Elixir", "elixir"},
+      {"JavaScript", "javascript"},
+      {"TypeScript", "typescript"},
+      {"Python", "python"},
+      {"Go", "go"},
+      {"Ruby", "ruby"},
+      {"Rust", "rust"},
+      {"SQL", "sql"},
+      {"HTML", "html"},
+      {"CSS", "css"},
+      {"Bash", "bash"}
+    ]
+  end
+
+  defp render_message_body(%Message{format: :markdown, body: body}) do
+    body
+    |> Earmark.as_html!(compact_output: true)
+    |> HtmlSanitizeEx.basic_html()
+    |> Phoenix.HTML.raw()
+  end
+
+  defp render_message_body(%Message{body: body}), do: body
 end

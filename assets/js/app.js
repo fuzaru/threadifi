@@ -24,6 +24,18 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/threadifi"
 import topbar from "../vendor/topbar"
+import hljs from "highlight.js/lib/core"
+import bash from "highlight.js/lib/languages/bash"
+import css from "highlight.js/lib/languages/css"
+import elixir from "highlight.js/lib/languages/elixir"
+import go from "highlight.js/lib/languages/go"
+import html from "highlight.js/lib/languages/xml"
+import javascript from "highlight.js/lib/languages/javascript"
+import python from "highlight.js/lib/languages/python"
+import ruby from "highlight.js/lib/languages/ruby"
+import rust from "highlight.js/lib/languages/rust"
+import sql from "highlight.js/lib/languages/sql"
+import typescript from "highlight.js/lib/languages/typescript"
 
 const ChannelMessages = {
   mounted() {
@@ -79,9 +91,28 @@ const ChannelMessages = {
   },
 }
 
+hljs.registerLanguage("bash", bash)
+hljs.registerLanguage("css", css)
+hljs.registerLanguage("elixir", elixir)
+hljs.registerLanguage("go", go)
+hljs.registerLanguage("html", html)
+hljs.registerLanguage("javascript", javascript)
+hljs.registerLanguage("python", python)
+hljs.registerLanguage("ruby", ruby)
+hljs.registerLanguage("rust", rust)
+hljs.registerLanguage("sql", sql)
+hljs.registerLanguage("typescript", typescript)
+
 const MessageComposer = {
   mounted() {
     this.el.addEventListener("keydown", (event) => {
+      if (this.el.value.trim() === "/snippet" && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault()
+        this.el.value = ""
+        this.pushEvent("open_snippet_modal", {})
+        return
+      }
+
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault()
         let form = this.el.closest("form")
@@ -93,11 +124,38 @@ const MessageComposer = {
   },
 }
 
+const SnippetCopy = {
+  mounted() {
+    this.el.addEventListener("click", () => {
+      let targetId = this.el.dataset.target
+      if (!targetId) return
+      let code = document.getElementById(targetId)
+      if (!code) return
+      navigator.clipboard.writeText(code.innerText || "")
+      const label = this.el.querySelector(".copy-label")
+      if (!label) return
+      label.textContent = "Copied"
+      setTimeout(() => {
+        label.textContent = "Copy"
+      }, 1500)
+    })
+  },
+}
+
+const SnippetHighlight = {
+  mounted() {
+    hljs.highlightElement(this.el)
+  },
+  updated() {
+    hljs.highlightElement(this.el)
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ChannelMessages, MessageComposer},
+  hooks: {...colocatedHooks, ChannelMessages, MessageComposer, SnippetCopy, SnippetHighlight},
 })
 
 // Show progress bar on live navigation and form submits

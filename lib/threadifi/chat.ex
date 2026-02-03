@@ -24,7 +24,7 @@ defmodule Threadifi.Chat do
     |> maybe_before(before)
     |> order_by([m], asc: m.inserted_at)
     |> limit(^limit)
-    |> preload(:user)
+    |> preload([:user, :snippet])
     |> Repo.all()
   end
 
@@ -55,7 +55,16 @@ defmodule Threadifi.Chat do
     |> Multi.insert(:snippet, fn %{message: message} ->
       Snippet.changeset(%Snippet{}, Map.put(snippet_attrs, :message_id, message.id))
     end)
+    |> Multi.run(:message_with_assocs, fn repo, %{message: message} ->
+      {:ok, repo.preload(message, [:user, :snippet])}
+    end)
     |> Repo.transaction()
+    |> case do
+      {:ok, %{message_with_assocs: message}} -> {:ok, message}
+      {:error, :message, changeset, _} -> {:error, changeset}
+      {:error, :snippet, changeset, _} -> {:error, changeset}
+      {:error, :message_with_assocs, reason, _} -> {:error, reason}
+    end
   end
 
   def toggle_reaction(%User{id: user_id}, %Message{id: message_id}, emoji)
