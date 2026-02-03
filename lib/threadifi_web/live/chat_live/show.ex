@@ -19,20 +19,25 @@ defmodule ThreadifiWeb.ChatLive.Show do
          channels <- Workspaces.list_channels(current_scope, workspace),
          channel when not is_nil(channel) <- Enum.find(channels, &(&1.slug == channel_slug)),
          :ok <- authorize_channel(channel, current_scope) do
+      members = Workspaces.list_channel_members(channel)
+
       if connected?(socket) do
         Phoenix.PubSub.subscribe(Threadifi.PubSub, channel_topic(channel))
       end
 
-        socket =
-          socket
-          |> assign(:page_title, channel.name)
-          |> assign(:workspace, workspace)
-          |> assign(:channels, channels)
-          |> assign(:channel, channel)
-          |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
-          |> assign(:show_snippet_modal, false)
-          |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
-          |> stream(:messages, Chat.list_messages(channel.id))
+      socket =
+        socket
+        |> assign(:page_title, channel.name)
+        |> assign(:workspace, workspace)
+        |> assign(:channels, channels)
+        |> assign(:channel, channel)
+        |> assign(:channel_members, members)
+        |> assign(:mention_query, nil)
+        |> assign(:mention_suggestions, [])
+        |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
+        |> assign(:show_snippet_modal, false)
+        |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
+        |> stream(:messages, Chat.list_messages(channel.id))
 
       {:ok, socket}
     else
@@ -108,6 +113,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
                   id={id}
                   class="group flex gap-4 border-b border-slate-100 py-4 last:border-b-0"
                 >
+                  <span id={"message-#{message.id}"} class="sr-only"></span>
                   <div class="mt-1 h-10 w-10 flex-shrink-0 rounded-full bg-slate-200 text-center text-sm font-semibold leading-10 text-slate-600">
                     {String.first(message.user.email) |> String.upcase()}
                   </div>
@@ -163,7 +169,12 @@ defmodule ThreadifiWeb.ChatLive.Show do
               </section>
 
               <footer class="border-t border-slate-200 px-6 py-4">
-                <.form for={@form} id="message-form" phx-submit="send_message">
+                <.form
+                  for={@form}
+                  id="message-form"
+                  phx-submit="send_message"
+                  phx-change="change_message"
+                >
                   <div class="relative">
                     <.input
                       field={@form[:body]}
@@ -175,6 +186,26 @@ defmodule ThreadifiWeb.ChatLive.Show do
                       rows="4"
                       required
                     />
+                    <%= if @mention_query && @mention_suggestions != [] do %>
+                      <div class="absolute bottom-16 left-3 z-10 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
+                        <ul class="max-h-44 overflow-y-auto p-2 text-sm text-slate-700">
+                          <li
+                            :for={user <- @mention_suggestions}
+                            class="flex items-center justify-between rounded-lg px-2 py-2 transition hover:bg-slate-100"
+                          >
+                            <button
+                              type="button"
+                              phx-click="select_mention"
+                              phx-value-username={username_for_user(user)}
+                              class="flex w-full items-center justify-between text-left"
+                            >
+                              <span class="font-semibold">@{username_for_user(user)}</span>
+                              <span class="text-xs text-slate-400">{user.email}</span>
+                            </button>
+                          </li>
+                        </ul>
+                      </div>
+                    <% end %>
                     <button
                       type="submit"
                       class="absolute bottom-3 right-3 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
@@ -261,11 +292,44 @@ defmodule ThreadifiWeb.ChatLive.Show do
           {:message_created, message}
         )
 
-        {:noreply, assign(socket, :form, to_form(Chat.Message.changeset(%Message{}, %{})))}
+        {:noreply,
+         socket
+         |> assign(:mention_query, nil)
+         |> assign(:mention_suggestions, [])
+         |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset))}
     end
+  end
+
+  @impl true
+  def handle_event("change_message", %{"message" => params}, socket) do
+    body = Map.get(params, "body", "")
+
+    {mention_query, mention_suggestions} =
+      mention_suggestions(body, socket.assigns.channel_members)
+
+    changeset = Ecto.Changeset.change(%Message{}, %{body: body})
+
+    {:noreply,
+     socket
+     |> assign(:mention_query, mention_query)
+     |> assign(:mention_suggestions, mention_suggestions)
+     |> assign(:form, to_form(changeset))}
+  end
+
+  @impl true
+  def handle_event("select_mention", %{"username" => username}, socket) do
+    body = Ecto.Changeset.get_field(socket.assigns.form.source, :body) || ""
+    updated_body = replace_trailing_mention(body, username)
+    changeset = Ecto.Changeset.change(%Message{}, %{body: updated_body})
+
+    {:noreply,
+     socket
+     |> assign(:mention_query, nil)
+     |> assign(:mention_suggestions, [])
+     |> assign(:form, to_form(changeset))}
   end
 
   @impl true
@@ -379,4 +443,40 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp render_message_body(%Message{body: body}), do: body
+
+  defp mention_suggestions(body, members) do
+    case extract_mention_query(body) do
+      nil ->
+        {nil, []}
+
+      query ->
+        suggestions =
+          members
+          |> Enum.filter(fn user ->
+            String.starts_with?(username_for_user(user), query)
+          end)
+          |> Enum.take(6)
+
+        {query, suggestions}
+    end
+  end
+
+  defp extract_mention_query(body) do
+    case Regex.run(~r/(?:^|\s)@([\w\.-]{0,32})$/, body) do
+      [_, query] -> String.downcase(query)
+      _ -> nil
+    end
+  end
+
+  defp replace_trailing_mention(body, username) do
+    Regex.replace(~r/(?:^|\s)@[\w\.-]{0,32}$/, body, " @#{username}")
+    |> String.trim_leading()
+  end
+
+  defp username_for_user(user) do
+    user.email
+    |> String.split("@")
+    |> List.first()
+    |> String.downcase()
+  end
 end

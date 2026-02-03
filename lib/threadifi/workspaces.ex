@@ -62,6 +62,14 @@ defmodule Threadifi.Workspaces do
     |> Repo.all()
   end
 
+  def list_channel_members(%Channel{id: channel_id}) do
+    User
+    |> join(:inner, [u], m in ChannelMembership, on: m.user_id == u.id)
+    |> where([u, m], m.channel_id == ^channel_id)
+    |> order_by([u], asc: u.email)
+    |> Repo.all()
+  end
+
   def create_channel(%Workspace{id: workspace_id}, attrs) do
     created_by_user_id =
       Map.get(attrs, :created_by_user_id) || Map.get(attrs, "created_by_user_id")

@@ -7,8 +7,8 @@ defmodule Threadifi.Chat do
   alias Ecto.Multi
   alias Threadifi.Repo
 
-  alias Threadifi.Accounts.User
-  alias Threadifi.Chat.{Message, MessageReaction, Snippet}
+  alias Threadifi.Accounts.{Scope, User}
+  alias Threadifi.Chat.{Mention, Message, MessageReaction, Snippet}
   alias Threadifi.Workspaces.Channel
 
   def list_messages(channel_id, opts \\ [])
@@ -21,22 +21,32 @@ defmodule Threadifi.Chat do
 
     Message
     |> where([m], m.channel_id == ^channel_id)
+    |> where([m], is_nil(m.parent_message_id))
     |> maybe_before(before)
     |> order_by([m], asc: m.inserted_at)
     |> limit(^limit)
-    |> preload([:user, :snippet])
+    |> preload([:user, :snippet, :mentions])
     |> Repo.all()
   end
 
   def create_message(%User{id: user_id}, %Channel{id: channel_id}, attrs) do
     attrs = normalize_message_attrs(attrs, user_id, channel_id, :text)
 
-    %Message{}
-    |> Message.changeset(attrs)
-    |> Repo.insert()
+    Multi.new()
+    |> Multi.insert(:message, Message.changeset(%Message{}, attrs))
+    |> Multi.run(:mentions, fn repo, %{message: message} ->
+      body = Map.get(attrs, :body) || Map.get(attrs, "body") || ""
+      create_mentions_for_message(repo, message, body)
+    end)
+    |> Multi.run(:message_with_assocs, fn repo, %{message: message} ->
+      {:ok, repo.preload(message, [:user, :snippet, :mentions])}
+    end)
+    |> Repo.transaction()
     |> case do
-      {:ok, message} -> {:ok, Repo.preload(message, :user)}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, %{message_with_assocs: message}} -> {:ok, message}
+      {:error, :message, changeset, _} -> {:error, changeset}
+      {:error, :mentions, changeset, _} -> {:error, changeset}
+      {:error, :message_with_assocs, reason, _} -> {:error, reason}
     end
   end
 
@@ -55,16 +65,54 @@ defmodule Threadifi.Chat do
     |> Multi.insert(:snippet, fn %{message: message} ->
       Snippet.changeset(%Snippet{}, Map.put(snippet_attrs, :message_id, message.id))
     end)
+    |> Multi.run(:mentions, fn repo, %{message: message} ->
+      body = Map.get(message_attrs, :body) || Map.get(message_attrs, "body") || ""
+      create_mentions_for_message(repo, message, body)
+    end)
     |> Multi.run(:message_with_assocs, fn repo, %{message: message} ->
-      {:ok, repo.preload(message, [:user, :snippet])}
+      {:ok, repo.preload(message, [:user, :snippet, :mentions])}
     end)
     |> Repo.transaction()
     |> case do
       {:ok, %{message_with_assocs: message}} -> {:ok, message}
       {:error, :message, changeset, _} -> {:error, changeset}
       {:error, :snippet, changeset, _} -> {:error, changeset}
+      {:error, :mentions, changeset, _} -> {:error, changeset}
       {:error, :message_with_assocs, reason, _} -> {:error, reason}
     end
+  end
+
+  def get_message!(id) do
+    Message
+    |> where([m], m.id == ^id)
+    |> preload([:user, :snippet])
+    |> Repo.one!()
+  end
+
+  def list_thread_messages(parent_message_id) when is_integer(parent_message_id) do
+    Message
+    |> where([m], m.parent_message_id == ^parent_message_id)
+    |> order_by([m], asc: m.inserted_at)
+    |> preload([:user, :snippet, :mentions])
+    |> Repo.all()
+  end
+
+  def list_mentions_for_user(%Scope{user: %User{id: user_id}}) do
+    Mention
+    |> where([m], m.mentioned_user_id == ^user_id)
+    |> join(:inner, [m], msg in assoc(m, :message))
+    |> join(:inner, [m, msg], ch in assoc(msg, :channel))
+    |> join(:inner, [m, msg, ch], w in assoc(ch, :workspace))
+    |> preload([m, msg, ch, w], message: {msg, [:user, :snippet, channel: {ch, :workspace}]})
+    |> order_by([m], desc: m.inserted_at)
+    |> Repo.all()
+  end
+
+  def extract_mentions(body) when is_binary(body) do
+    body
+    |> then(&Regex.scan(~r/(?:^|\s)@([\w\.-]{1,32})/, &1))
+    |> Enum.map(fn [_, username] -> String.downcase(username) end)
+    |> Enum.uniq()
   end
 
   def toggle_reaction(%User{id: user_id}, %Message{id: message_id}, emoji)
@@ -108,5 +156,31 @@ defmodule Threadifi.Chat do
 
   defp fetch_attr(attrs, atom_key, string_key) do
     Map.get(attrs, atom_key) || Map.get(attrs, string_key)
+  end
+
+  defp create_mentions_for_message(repo, message, body) do
+    usernames = extract_mentions(body)
+
+    if usernames == [] do
+      {:ok, []}
+    else
+      users =
+        User
+        |> where([u], fragment("lower(split_part(?, '@', 1))", u.email) in ^usernames)
+        |> repo.all()
+
+      rows =
+        Enum.map(users, fn user ->
+          %{
+            message_id: message.id,
+            mentioned_user_id: user.id,
+            inserted_at: DateTime.utc_now(:second),
+            updated_at: DateTime.utc_now(:second)
+          }
+        end)
+
+      {_, _} = repo.insert_all(Mention, rows, on_conflict: :nothing)
+      {:ok, rows}
+    end
   end
 end
