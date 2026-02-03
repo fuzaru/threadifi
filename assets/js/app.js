@@ -121,6 +121,7 @@ hljs.registerLanguage("typescript", typescript)
 
 const MessageComposer = {
   mounted() {
+    this.typingTimer = null
     this.el.addEventListener("keydown", (event) => {
       if (this.el.value.trim() === "/snippet" && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault()
@@ -137,6 +138,13 @@ const MessageComposer = {
           form.requestSubmit()
         }
       }
+    })
+
+    this.el.addEventListener("input", () => {
+      clearTimeout(this.typingTimer)
+      this.typingTimer = setTimeout(() => {
+        this.pushEvent("typing", {})
+      }, 500)
     })
   },
 }

@@ -12,6 +12,7 @@ defmodule Threadifi.Application do
       Threadifi.Repo,
       {DNSCluster, query: Application.get_env(:threadifi, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Threadifi.PubSub},
+      ThreadifiWeb.Presence,
       # Start a worker by calling: Threadifi.Worker.start_link(arg)
       # {Threadifi.Worker, arg},
       # Start to serve requests, typically the last entry

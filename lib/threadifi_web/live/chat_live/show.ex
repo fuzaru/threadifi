@@ -5,6 +5,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
   alias Threadifi.Chat.Message
   alias Threadifi.Chat.Snippet
   alias Threadifi.Workspaces
+  alias ThreadifiWeb.Presence
 
   @impl true
   def mount(
@@ -23,6 +24,11 @@ defmodule ThreadifiWeb.ChatLive.Show do
 
       if connected?(socket) do
         Phoenix.PubSub.subscribe(Threadifi.PubSub, channel_topic(channel))
+
+        Presence.track(self(), channel_presence_topic(channel), current_scope.user.id, %{
+          email: current_scope.user.email,
+          joined_at: DateTime.utc_now(:second)
+        })
       end
 
       socket =
@@ -40,6 +46,8 @@ defmodule ThreadifiWeb.ChatLive.Show do
         |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
         |> assign(:thread_parent, nil)
         |> assign(:thread_form, to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread))
+        |> assign(:typing_users, %{})
+        |> assign(:online_users, online_users(channel))
         |> assign(:search_query, "")
         |> assign(:search_results, [])
         |> stream(:thread_messages, [])
@@ -91,6 +99,18 @@ defmodule ThreadifiWeb.ChatLive.Show do
               </div>
               <div class="rounded-lg border border-dashed border-slate-200 px-3 py-2">
                 Files
+              </div>
+            </div>
+            <div class="mt-8">
+              <div class="text-xs uppercase tracking-wide text-slate-500">Online</div>
+              <div class="mt-3 space-y-2 text-sm text-slate-600">
+                <div
+                  :for={user <- @online_users}
+                  class="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"
+                >
+                  <span class="truncate">{user.email}</span>
+                  <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+                </div>
               </div>
             </div>
           </aside>
@@ -217,6 +237,11 @@ defmodule ThreadifiWeb.ChatLive.Show do
                 </section>
 
                 <footer class="border-t border-slate-200 px-6 py-4">
+                  <%= if typing_indicator(@typing_users) do %>
+                    <div class="mb-2 text-xs text-slate-500">
+                      {typing_indicator(@typing_users)}
+                    </div>
+                  <% end %>
                   <.form
                     for={@form}
                     id="message-form"
@@ -451,6 +476,20 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
+  def handle_event("typing", _params, socket) do
+    user = socket.assigns.current_scope.user
+    channel = socket.assigns.channel
+
+    Phoenix.PubSub.broadcast(
+      Threadifi.PubSub,
+      channel_topic(channel),
+      {:typing, %{user_id: user.id, email: user.email}}
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_event("search", %{"search" => %{"query" => query}}, socket) do
     results =
       Chat.search_workspace(
@@ -665,6 +704,34 @@ defmodule ThreadifiWeb.ChatLive.Show do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    {:noreply, assign(socket, :online_users, online_users(socket.assigns.channel))}
+  end
+
+  @impl true
+  def handle_info({:typing, payload}, socket) do
+    typing_users =
+      socket.assigns.typing_users
+      |> Map.put(payload.user_id, %{email: payload.email, at: System.monotonic_time(:millisecond)})
+
+    Process.send_after(self(), :clear_typing, 2_500)
+
+    {:noreply, assign(socket, :typing_users, typing_users)}
+  end
+
+  @impl true
+  def handle_info(:clear_typing, socket) do
+    cutoff = System.monotonic_time(:millisecond) - 2_000
+
+    typing_users =
+      socket.assigns.typing_users
+      |> Enum.filter(fn {_id, meta} -> meta.at > cutoff end)
+      |> Map.new()
+
+    {:noreply, assign(socket, :typing_users, typing_users)}
+  end
+
   defp authorize_channel(%{type: :public}, _scope), do: :ok
 
   defp authorize_channel(%{type: :private} = channel, %{user: user}) do
@@ -676,6 +743,8 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp channel_topic(channel), do: "channel:#{channel.id}"
+
+  defp channel_presence_topic(channel), do: "channel:#{channel.id}:presence"
 
   defp snippet_changeset(attrs) do
     {%Snippet{}, %{title: :string, language: :string, code: :string}}
@@ -707,6 +776,31 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp render_message_body(%Message{body: body}), do: body
+
+  defp online_users(channel) do
+    Presence.list(channel_presence_topic(channel))
+    |> Enum.map(fn {_user_id, metas} ->
+      metas
+      |> Map.get(:metas, [])
+      |> List.first()
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp typing_indicator(typing_users) do
+    emails =
+      typing_users
+      |> Map.values()
+      |> Enum.map(& &1.email)
+      |> Enum.take(3)
+
+    case emails do
+      [] -> nil
+      [one] -> "#{one} is typing…"
+      [one, two] -> "#{one} and #{two} are typing…"
+      [one, two, three] -> "#{one}, #{two}, and #{three} are typing…"
+    end
+  end
 
   defp message_preview(%Message{format: :snippet, snippet: snippet}) do
     snippet.title || String.slice(snippet.code, 0, 120)
