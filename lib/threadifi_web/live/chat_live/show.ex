@@ -40,6 +40,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
         |> assign(:channel_members, members)
         |> assign(:mention_query, nil)
         |> assign(:mention_suggestions, [])
+        |> assign(:message_format, :text)
         |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))
         |> assign(:show_snippet_modal, false)
         |> assign(:snippet_target, :main)
@@ -325,6 +326,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
                     phx-change="change_message"
                   >
                     <div class="relative">
+                      <input type="hidden" name="message[format]" value={@message_format} />
                       <.input
                         field={@form[:body]}
                         type="textarea"
@@ -366,6 +368,10 @@ defmodule ThreadifiWeb.ChatLive.Show do
                     <p class="mt-2 text-xs text-slate-400">
                       Enter to send · Shift + Enter for a new line
                     </p>
+                    <div class="mt-2 text-xs text-slate-400">
+                      Slash commands: <span class="font-semibold text-slate-500">/bug</span>, <span class="font-semibold text-slate-500">/review</span>,
+                      <span class="font-semibold text-slate-500">/standup</span>
+                    </div>
                   </.form>
                 </footer>
               </div>
@@ -559,6 +565,7 @@ defmodule ThreadifiWeb.ChatLive.Show do
          socket
          |> assign(:mention_query, nil)
          |> assign(:mention_suggestions, [])
+         |> assign(:message_format, :text)
          |> assign(:form, to_form(Chat.Message.changeset(%Message{}, %{})))}
 
       {:error, changeset} ->
@@ -717,12 +724,15 @@ defmodule ThreadifiWeb.ChatLive.Show do
     {mention_query, mention_suggestions} =
       mention_suggestions(body, socket.assigns.channel_members)
 
-    changeset = Ecto.Changeset.change(%Message{}, %{body: body})
+    {body, format} = apply_slash_template(body, socket.assigns.message_format)
+
+    changeset = Ecto.Changeset.change(%Message{}, %{body: body, format: format})
 
     {:noreply,
      socket
      |> assign(:mention_query, mention_query)
      |> assign(:mention_suggestions, mention_suggestions)
+     |> assign(:message_format, format)
      |> assign(:form, to_form(changeset))}
   end
 
@@ -944,6 +954,57 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp render_message_body(%Message{body: body}), do: body
+
+  defp apply_slash_template(body, current_format) do
+    trimmed = String.trim(body)
+
+    case trimmed do
+      "/bug" -> {bug_template(), :markdown}
+      "/review" -> {review_template(), :markdown}
+      "/standup" -> {standup_template(), :markdown}
+      _ -> {body, current_format || :text}
+    end
+  end
+
+  defp bug_template do
+    """
+    ## Bug Report
+
+    **Summary:** 
+    **Steps to Reproduce:**
+    1. 
+    2. 
+    3. 
+
+    **Expected:** 
+    **Actual:** 
+    **Environment:** 
+    """
+    |> String.trim()
+  end
+
+  defp review_template do
+    """
+    ## Code Review Request
+
+    **Context:** 
+    **Focus Areas:** 
+    **Risks:** 
+    **Tests:** 
+    """
+    |> String.trim()
+  end
+
+  defp standup_template do
+    """
+    ## Standup
+
+    **Yesterday:** 
+    **Today:** 
+    **Blockers:** 
+    """
+    |> String.trim()
+  end
 
   defp online_users(channel) do
     Presence.list(channel_presence_topic(channel))
