@@ -16,8 +16,8 @@ defmodule Threadifi.Workspaces.ChannelMembership do
 
   def changeset(membership, attrs) do
     membership
-    |> cast(attrs, [:channel_id, :user_id, :role])
-    |> validate_required([:channel_id, :user_id, :role])
+    |> cast(attrs, [:role])
+    |> validate_required([:role])
     |> unique_constraint(:channel_id, name: :channel_memberships_channel_id_user_id_index)
   end
 end

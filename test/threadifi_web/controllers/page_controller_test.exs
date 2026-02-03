@@ -1,8 +1,8 @@
 defmodule ThreadifiWeb.PageControllerTest do
   use ThreadifiWeb.ConnCase
 
-  test "GET /", %{conn: conn} do
+  test "GET / redirects unauthenticated users", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+    assert redirected_to(conn) == ~p"/users/log-in"
   end
 end

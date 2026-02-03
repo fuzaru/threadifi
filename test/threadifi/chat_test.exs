@@ -4,33 +4,31 @@ defmodule Threadifi.ChatTest do
   alias Threadifi.AccountsFixtures
   alias Threadifi.Chat
   alias Threadifi.Chat.{Message, MessageReaction, Snippet}
-  alias Threadifi.Repo
-  alias Threadifi.Workspaces.{Channel, Workspace}
+  alias Threadifi.Workspaces
 
   defp workspace_fixture(owner) do
-    attrs = %{
-      name: "Workspace #{System.unique_integer()}",
-      slug: "workspace-#{System.unique_integer()}",
-      owner_user_id: owner.id
-    }
+    scope = AccountsFixtures.user_scope_fixture(owner)
 
-    %Workspace{}
-    |> Workspace.changeset(attrs)
-    |> Repo.insert!()
+    {:ok, workspace} =
+      Workspaces.create_workspace(scope, %{
+        name: "Workspace #{System.unique_integer()}",
+        slug: "workspace-#{System.unique_integer()}"
+      })
+
+    workspace
   end
 
   defp channel_fixture(workspace, owner) do
-    attrs = %{
-      name: "General",
-      slug: "general-#{System.unique_integer()}",
-      type: :public,
-      workspace_id: workspace.id,
-      created_by_user_id: owner.id
-    }
+    scope = AccountsFixtures.user_scope_fixture(owner)
 
-    %Channel{}
-    |> Channel.changeset(attrs)
-    |> Repo.insert!()
+    {:ok, channel} =
+      Workspaces.create_channel(scope, workspace, %{
+        name: "General",
+        slug: "general-#{System.unique_integer()}",
+        type: :public
+      })
+
+    channel
   end
 
   test "message changeset requires body, format, channel, and user" do

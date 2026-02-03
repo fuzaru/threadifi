@@ -17,8 +17,11 @@ defmodule Threadifi.Workspaces.Workspace do
 
   def changeset(workspace, attrs) do
     workspace
-    |> cast(attrs, [:name, :slug, :owner_user_id])
-    |> validate_required([:name, :slug, :owner_user_id])
+    |> cast(attrs, [:name, :slug])
+    |> validate_required([:name, :slug])
+    |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
+      message: "must be lowercase letters, numbers, or dashes"
+    )
     |> unique_constraint(:slug)
   end
 end

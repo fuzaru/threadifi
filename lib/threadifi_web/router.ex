@@ -17,12 +17,6 @@ defmodule ThreadifiWeb.Router do
     plug :accepts, ["json"]
   end
 
-  scope "/", ThreadifiWeb do
-    pipe_through :browser
-
-    get "/", PageController, :home
-  end
-
   # Other scopes may use custom stacks.
   # scope "/api", ThreadifiWeb do
   #   pipe_through :api
@@ -52,6 +46,8 @@ defmodule ThreadifiWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{ThreadifiWeb.UserAuth, :require_authenticated}] do
+      live "/", WorkspaceLive.Index, :index
+      live "/w/:workspace_slug", WorkspaceLive.Show, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

@@ -19,8 +19,11 @@ defmodule Threadifi.Workspaces.Channel do
 
   def changeset(channel, attrs) do
     channel
-    |> cast(attrs, [:workspace_id, :name, :slug, :type, :created_by_user_id])
-    |> validate_required([:workspace_id, :name, :slug, :type, :created_by_user_id])
+    |> cast(attrs, [:name, :slug, :type])
+    |> validate_required([:name, :slug, :type])
+    |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
+      message: "must be lowercase letters, numbers, or dashes"
+    )
     |> unique_constraint(:slug, name: :channels_workspace_id_slug_index)
   end
 end
