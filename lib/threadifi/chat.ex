@@ -97,6 +97,47 @@ defmodule Threadifi.Chat do
     |> Repo.all()
   end
 
+  def search_workspace(%Scope{user: %User{id: user_id}}, workspace_id, query) do
+    query = String.trim(query || "")
+
+    if query == "" do
+      []
+    else
+      pattern = "%#{query}%"
+
+      Message
+      |> join(:inner, [m], c in assoc(m, :channel))
+      |> join(:inner, [m, c], u in assoc(m, :user))
+      |> join(:inner, [m, c, u], w in assoc(c, :workspace))
+      |> join(:left, [m], s in assoc(m, :snippet))
+      |> where([m, c, _u, w], w.id == ^workspace_id and w.owner_user_id == ^user_id)
+      |> where(
+        [m, _c, _u, _w, s],
+        ilike(m.body, ^pattern) or ilike(s.title, ^pattern) or ilike(s.code, ^pattern)
+      )
+      |> preload([m, c, u, _w, s], user: u, channel: c, snippet: s)
+      |> order_by([m], desc: m.inserted_at)
+      |> limit(50)
+      |> Repo.all()
+      |> group_search_results()
+    end
+  end
+
+  defp group_search_results(messages) do
+    messages
+    |> Enum.group_by(& &1.channel_id)
+    |> Enum.map(fn {_channel_id, group} ->
+      channel = group |> List.first() |> Map.fetch!(:channel)
+      %{channel: channel, messages: group}
+    end)
+    |> Enum.sort_by(
+      fn %{messages: messages} ->
+        messages |> List.first() |> Map.fetch!(:inserted_at)
+      end,
+      :desc
+    )
+  end
+
   def list_mentions_for_user(%Scope{user: %User{id: user_id}}) do
     Mention
     |> where([m], m.mentioned_user_id == ^user_id)

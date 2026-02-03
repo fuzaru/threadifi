@@ -40,6 +40,8 @@ defmodule ThreadifiWeb.ChatLive.Show do
         |> assign(:snippet_form, to_form(snippet_changeset(%{}), as: :snippet))
         |> assign(:thread_parent, nil)
         |> assign(:thread_form, to_form(Chat.Message.changeset(%Message{}, %{}), as: :thread))
+        |> assign(:search_query, "")
+        |> assign(:search_results, [])
         |> stream(:thread_messages, [])
         |> stream(:messages, Chat.list_messages(channel.id))
 
@@ -101,9 +103,64 @@ defmodule ThreadifiWeb.ChatLive.Show do
                     <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Channel</p>
                     <h1 class="text-lg font-semibold text-slate-900">#{@channel.name}</h1>
                   </div>
-                  <span class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {@channel.type}
-                  </span>
+                  <div class="flex items-center gap-4">
+                    <.form
+                      for={to_form(%{"query" => @search_query}, as: :search)}
+                      id="search-form"
+                      phx-change="search"
+                      phx-submit="search_submit"
+                      class="relative"
+                    >
+                      <input
+                        type="text"
+                        name="search[query]"
+                        value={@search_query}
+                        placeholder="Search this workspace…"
+                        phx-debounce="250"
+                        class="w-64 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-700 shadow-sm focus:border-slate-300 focus:outline-none"
+                      />
+                      <%= if @search_results != [] do %>
+                        <div class="absolute right-0 mt-2 w-96 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                          <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Results
+                          </div>
+                          <div class="mt-3 space-y-3">
+                            <div
+                              :for={group <- @search_results}
+                              class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+                            >
+                              <div class="text-xs font-semibold text-slate-600">
+                                #{group.channel.name}
+                              </div>
+                              <div class="mt-2 space-y-2">
+                                <.link
+                                  :for={message <- group.messages}
+                                  navigate={
+                                  ~p"/w/#{@workspace.slug}/c/#{group.channel.slug}" <>
+                                    "#message-#{message.id}"
+                                }
+                                  class="block rounded-lg bg-white px-3 py-2 text-xs text-slate-600 transition hover:bg-slate-100"
+                                >
+                                  <span class="font-semibold text-slate-800">
+                                    {message.user.email}
+                                  </span>
+                                  <span class="ml-2 text-slate-400">
+                                    {Calendar.strftime(message.inserted_at, "%b %d · %I:%M%p")}
+                                  </span>
+                                  <div class="mt-1 line-clamp-2 text-[11px] text-slate-500">
+                                    {message_preview(message)}
+                                  </div>
+                                </.link>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
+                    </.form>
+                    <span class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {@channel.type}
+                    </span>
+                  </div>
                 </header>
 
                 <section
@@ -394,6 +451,23 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   @impl true
+  def handle_event("search", %{"search" => %{"query" => query}}, socket) do
+    results =
+      Chat.search_workspace(
+        socket.assigns.current_scope,
+        socket.assigns.workspace.id,
+        query
+      )
+
+    {:noreply, assign(socket, :search_query, query) |> assign(:search_results, results)}
+  end
+
+  @impl true
+  def handle_event("search_submit", _params, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_event("open_thread", %{"message-id" => message_id}, socket) do
     message_id = String.to_integer(message_id)
     parent = Chat.get_message!(message_id)
@@ -633,6 +707,14 @@ defmodule ThreadifiWeb.ChatLive.Show do
   end
 
   defp render_message_body(%Message{body: body}), do: body
+
+  defp message_preview(%Message{format: :snippet, snippet: snippet}) do
+    snippet.title || String.slice(snippet.code, 0, 120)
+  end
+
+  defp message_preview(%Message{body: body}) do
+    String.slice(body, 0, 120)
+  end
 
   defp snippet_card(assigns) do
     assigns = assign_new(assigns, :compact, fn -> false end)

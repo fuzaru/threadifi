@@ -53,9 +53,11 @@ const ChannelMessages = {
     }
 
     this.scrollToBottom()
+    this.maybeHighlightFromHash()
   },
   updated() {
     this.onNewMessage()
+    this.maybeHighlightFromHash()
   },
   onNewMessage() {
     if (this.isNearBottom()) {
@@ -88,6 +90,20 @@ const ChannelMessages = {
       this.indicator.classList.add("hidden")
       this.indicator.classList.remove("flex")
     }
+  },
+  maybeHighlightFromHash() {
+    let hash = window.location.hash
+    if (!hash || !hash.startsWith("#message-")) return
+    let anchor = document.getElementById(hash.slice(1))
+    if (!anchor) return
+    let target = anchor.closest(".group") || anchor.parentElement
+    if (!target) return
+    target.classList.add("ring-2", "ring-amber-300", "bg-amber-50/60")
+    target.scrollIntoView({block: "center"})
+    clearTimeout(this.highlightTimer)
+    this.highlightTimer = setTimeout(() => {
+      target.classList.remove("ring-2", "ring-amber-300", "bg-amber-50/60")
+    }, 2000)
   },
 }
 
