@@ -2,6 +2,64 @@
 
 Threadifi is a Phoenix LiveView application.
 
+## Quickstart (after cloning)
+
+### Option 1: Local Postgres + local run
+
+1. Start Postgres and make sure this user/password works:
+
+```bash
+threadifi / threadifi_dev
+```
+
+If you need to create it:
+
+```bash
+sudo -u postgres psql -c "CREATE ROLE threadifi WITH LOGIN PASSWORD 'threadifi_dev';"
+sudo -u postgres psql -c "ALTER ROLE threadifi CREATEDB;"
+```
+
+2. Install project dependencies and assets:
+
+```bash
+mix deps.get
+cd assets && npm install && cd ..
+mix assets.setup
+```
+
+3. Export DB env vars and prepare databases:
+
+```bash
+export DB_USER=threadifi
+export DB_PASSWORD=threadifi_dev
+export DB_HOST=localhost
+mix ecto.setup
+MIX_ENV=test mix ecto.create
+MIX_ENV=test mix ecto.migrate
+```
+
+4. Run tests:
+
+```bash
+mix test
+```
+
+5. Run the app:
+
+```bash
+mix phx.server
+```
+
+Then visit http://localhost:4000.
+
+### Option 2: Docker (fastest zero-local-setup path)
+
+```bash
+docker compose up --build
+```
+
+The app will be available at http://localhost:4000 and will auto-run migrations and seeds.
+
 ## Setup
 
 ```bash
@@ -36,8 +94,7 @@ when at least one user exists.
 docker compose up --build
 ```
 
-The app will be available at http://localhost:4000 and will auto-run migrations
-and seeds on startup.
+The app will be available at http://localhost:4000 and will auto-run migrations and seeds on startup.
 
 ## Docker (release image)
 
