@@ -1,4 +1,5 @@
 defmodule Threadifi.Accounts.UserNotifier do
+  @moduledoc false
   import Swoosh.Email
 
   alias Threadifi.Mailer

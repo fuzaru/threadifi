@@ -1,4 +1,5 @@
 defmodule ThreadifiWeb.UserAuth do
+  @moduledoc false
   use ThreadifiWeb, :verified_routes
 
   import Plug.Conn

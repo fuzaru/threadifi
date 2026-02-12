@@ -1,4 +1,5 @@
 defmodule Threadifi.Chat.Mention do
+  @moduledoc false
   use Ecto.Schema
   import Ecto.Changeset
 

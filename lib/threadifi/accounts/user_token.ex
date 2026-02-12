@@ -1,4 +1,5 @@
 defmodule Threadifi.Accounts.UserToken do
+  @moduledoc false
   use Ecto.Schema
   import Ecto.Query
   alias Threadifi.Accounts.UserToken
