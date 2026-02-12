@@ -1,4 +1,16 @@
 {
   "css.validate": false,
-  "css.lint.unknownAtRules": "ignore"
+  "css.lint.unknownAtRules": "ignore",
+  "elixir.credo.executePath": "/home/fuzaru/.asdf/shims",
+  "elixir.credo.configurationFile": ".credo.exs",
+  "elixir.credo.ignoreWarningMessages": true,
+  "elixir.credo.lintEverything": false,
+  "files.watcherExclude": {
+    "**/deps/**": true,
+    "**/_build/**": true
+  },
+  "search.exclude": {
+    "**/deps/**": true,
+    "**/_build/**": true
+  }
 }
