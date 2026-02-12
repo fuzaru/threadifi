@@ -2,6 +2,6 @@
   "name": "threadifi-assets",
   "private": true,
   "dependencies": {
-    "highlight.js": "^11.10.0"
+    "highlight.js": "^11.11.1"
   }
 }
