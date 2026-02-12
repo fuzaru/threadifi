@@ -6,6 +6,15 @@ Threadifi is a Phoenix LiveView application.
 
 ### Option 1: Local Postgres + local run
 
+0. Create your local env file:
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+```
+
 1. Start Postgres and make sure this user/password works:
 
 ```bash
@@ -59,6 +68,70 @@ docker compose up --build
 ```
 
 The app will be available at http://localhost:4000 and will auto-run migrations and seeds.
+
+## CI
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+It runs:
+
+```bash
+mix deps.get
+npm ci --prefix assets
+mix compile --warnings-as-errors
+mix format --check-formatted
+mix credo --all
+mix ecto.create
+mix ecto.migrate
+mix test
+```
+
+with a Postgres 16 service (`threadifi` / `threadifi_dev`).
+
+## Deployment Runbook (Docker release image)
+
+1. Build image:
+
+```bash
+docker build -t threadifi:latest .
+```
+
+2. Set runtime env vars:
+
+```bash
+export DATABASE_URL='ecto://threadifi:threadifi_dev@<db-host>/threadifi_dev'
+export SECRET_KEY_BASE="$(mix phx.gen.secret)"
+export PHX_HOST='your-domain-or-ip'
+export PORT=4000
+```
+
+3. Start the release:
+
+```bash
+docker run --rm -p 4000:4000 \
+  -e DATABASE_URL \
+  -e SECRET_KEY_BASE \
+  -e PHX_HOST \
+  -e PORT \
+  threadifi:latest
+```
+
+4. Smoke test:
+
+```bash
+curl -I http://localhost:4000
+```
+
+5. Rollback:
+
+```bash
+docker run --rm -p 4000:4000 \
+  -e DATABASE_URL \
+  -e SECRET_KEY_BASE \
+  -e PHX_HOST \
+  -e PORT \
+  threadifi:<previous-tag>
+```
 
 ## Setup
 
